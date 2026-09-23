@@ -12,6 +12,8 @@ import networkx as nx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from typing import Literal
+from openai import AuthenticationError, OpenAI, RateLimitError
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = Path(os.environ.get("MONEYGRAPH_OUTPUT_DIR", ROOT / "outputs"))
@@ -20,8 +22,14 @@ ROLE_NAMES = {"coordinator": "координация", "consolidator": "конс
               "transit": "возможный транзит", "terminal": "возможная точка остановки", "peripheral": "периферия"}
 
 
+class AnalystTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class AnalystRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
+    history: list[AnalystTurn] = Field(default_factory=list, max_length=8)
 
 
 class Store:
@@ -213,85 +221,125 @@ def resilience(remove_top: int = Query(default=5, ge=1, le=50)):
             "limitation": "Структурный эксперимент на неполном графе; не утверждает контроль над средствами."}
 
 
-@app.post("/api/analyst")
-def analyst(request: AnalystRequest):
-    """Grounded, deterministic analyst assistant; works without any external key."""
-    store = get_store()
+def _analyst_node(store: Store, gid: str, include_edges: bool) -> dict:
+    node = store.nodes[gid]
+    result = {key: node.get(key) for key in (
+        "gid", "role", "role_score", "priority_score", "cluster_id", "depth", "is_seed",
+        "in_deg", "out_deg", "in_kzt", "out_kzt", "in_tx", "out_tx", "seed_reach",
+        "rapid_share", "pass_through", "cluster_bridge_score", "truncated_by_depth"
+    )}
+    if include_edges:
+        result["incoming_edges"] = sorted(store.in_edges[gid], key=lambda edge: -edge["sum_kzt"])[:8]
+        result["outgoing_edges"] = sorted(store.out_edges[gid], key=lambda edge: -edge["sum_kzt"])[:8]
+    return result
+
+
+def _analyst_context(store: Store, request: AnalystRequest) -> tuple[dict, set[str]]:
     question = request.question.strip()
     lower = question.lower()
-    gids = list(dict.fromkeys(re.findall(r"(?<!\d)\d{15,20}(?!\d)", question)))
-    referenced: list[str] = []
-    sources: list[dict] = []
-    if "каких данных" in lower or "огранич" in lower or "не хватает" in lower:
-        answer = ("Для проверки гипотезы нужны входящие переводы извне наблюдаемой сети, операции за пределами глубины 4, "
-                  "переводы ниже 5 000 ₸ и контекст владельцев счетов. Наблюдаемые связи не доказывают происхождение средств.")
-        sources = [{"type": "methodology", "id": "data-limitations"}]
-    elif "общ" in lower and ("получ" in lower or "отправ" in lower) and len(gids) >= 2:
-        known = [gid for gid in gids if gid in store.nodes]
-        if not known:
-            answer = "Указанные GID не найдены в наблюдаемой сети."
-        else:
-            direction = "получ" if "получ" in lower else "отправ"
-            sets = [set(store.graph.successors(gid) if direction == "получ" else store.graph.predecessors(gid)) for gid in known]
-            common = sorted(set.intersection(*sets)) if sets else []
-            referenced = common[:20]
-            answer = (f"Общие {'получатели' if direction == 'получ' else 'отправители'} для {len(known)} GID: " +
-                      (", ".join(referenced) if referenced else "в наблюдаемой сети не найдены") + ".")
-            sources = [{"type": "node", "id": gid} for gid in known]
-    elif ("путь" in lower or "связ" in lower) and len(gids) >= 2:
-        if all(gid in store.nodes for gid in gids[:2]):
+    requested = list(dict.fromkeys(re.findall(r"(?<!\d)\d{15,20}(?!\d)", question)))[:3]
+    if not requested and any(word in lower for word in ("этот", "этого", "его", "счёт", "счет")):
+        for turn in reversed(request.history):
+            found = re.findall(r"(?<!\d)\d{15,20}(?!\d)", turn.content)
+            if found:
+                requested = found[:1]
+                break
+    known = [gid for gid in requested if gid in store.nodes]
+    context = {
+        "summary": store.data["summary"],
+        "role_labels": ROLE_NAMES,
+        "role_threshold": 0.55,
+        "priority_weights_pct": {"role": 18, "weighted_pagerank": 14, "betweenness": 16,
+                                 "depth_relative_volume": 14, "seed_reach": 10, "cluster_bridge": 10,
+                                 "rapid_similar_amounts": 8, "anomaly": 10},
+        "data_limits": [
+            "Исходящий обход от 81 seed до глубины 4.",
+            "В выгрузке нет переводов менее 5000 KZT и внешних входящих операций.",
+            "На глубине 4 отсутствие исходящих не означает завершение потока.",
+            "Нет идентичностей владельцев и размеченных случаев нарушения.",
+            "Сходство суммы и времени не доказывает движение конкретных денег."
+        ],
+        "unknown_gids": [gid for gid in requested if gid not in store.nodes],
+    }
+    source_gids: set[str] = set()
+    if known:
+        context["nodes"] = [_analyst_node(store, gid, True) for gid in known]
+        source_gids.update(known)
+        for node in context["nodes"]:
+            source_gids.update(edge["src"] for edge in node["incoming_edges"])
+            source_gids.update(edge["dst"] for edge in node["outgoing_edges"])
+        if len(known) >= 2:
+            left, right = known[:2]
+            context["common_recipients"] = sorted(set(store.graph.successors(left)) & set(store.graph.successors(right)))[:20]
+            context["common_senders"] = sorted(set(store.graph.predecessors(left)) & set(store.graph.predecessors(right)))[:20]
+            source_gids.update(context["common_recipients"])
+            source_gids.update(context["common_senders"])
             try:
-                found = nx.shortest_path(store.graph, gids[0], gids[1])
-                referenced = found
-                answer = f"Наблюдаемый направленный путь ({len(found)-1} переходов): " + " → ".join(found) + ". Это не доказательство происхождения конкретных денег."
-                sources = [{"type": "node", "id": gid} for gid in found]
+                context["directed_shortest_path"] = nx.shortest_path(store.graph, left, right)
+                source_gids.update(context["directed_shortest_path"])
             except nx.NetworkXNoPath:
-                answer = "Направленный путь между указанными GID в наблюдаемой сети не найден."
-        else:
-            answer = "Один из указанных GID не найден в наблюдаемой сети."
-    elif gids:
-        gid = gids[0]
-        if gid not in store.nodes:
-            answer = f"GID {gid} не найден в наблюдаемой сети."
-        else:
-            node_data = store.nodes[gid]
-            referenced = [gid]
-            answer = (f"GID {gid}: {node_data['evidence']} Роль — {node_data['role']} "
-                      f"({node_data['role_score']:.0%}); приоритет проверки {node_data['priority_score']:.0%}; "
-                      f"кластер {node_data['cluster_id']}. Это гипотеза для аналитика.")
-            sources = [{"type": "node", "id": gid}]
-    elif ("связыва" in lower or "между" in lower) and len(re.findall(r"(?:кластер|cluster)\s*[№#]?\s*\d+", lower)) >= 2:
-        ids = [int(value) for value in re.findall(r"(?:кластер|cluster)\s*[№#]?\s*(\d+)", lower)[:2]]
-        cross = sorted((edge for edge in store.data["edges"] if
-                        {store.nodes[edge["src"]]["cluster_id"], store.nodes[edge["dst"]]["cluster_id"]} == set(ids)),
-                       key=lambda edge: -edge["sum_kzt"])
-        referenced = list(dict.fromkeys(gid for edge in cross[:5] for gid in (edge["src"], edge["dst"])))
-        answer = (f"Между кластерами {ids[0]} и {ids[1]} найдено {len(cross)} наблюдаемых связей. " +
-                  ("Крупнейшие пары: " + "; ".join(f"{edge['src']} → {edge['dst']}: {edge['sum_kzt']:,.0f} ₸" for edge in cross[:5])
-                   if cross else "Прямых переводов в выгрузке нет."))
-        sources = [{"type": "node", "id": gid} for gid in referenced]
-    elif "кластер" in lower or "cluster" in lower:
-        match = re.search(r"(?:кластер|cluster)\s*[№#]?\s*(\d+)", lower)
-        if match and int(match.group(1)) in store.clusters:
-            item = store.clusters[int(match.group(1))]
-            referenced = item["top_gids"].split(";")[:5]
-            answer = (f"Кластер {item['cluster_id']}: {item['n_nodes']} узлов, {item['n_seed']} seed, "
-                      f"внутренний наблюдаемый поток {item['sum_kzt_internal']:,.0f} ₸. {item['hypothesis']}")
-            sources = [{"type": "cluster", "id": item["cluster_id"]}]
-        else:
-            answer = "Укажите номер кластера, например: «Что необычного в кластере 7?»"
+                context["directed_shortest_path"] = None
+    elif requested:
+        context["nodes"] = []
     else:
-        role = "consolidator" if "консолид" in lower else "distributor" if "распредел" in lower else "transit" if "транзит" in lower else None
-        if role:
-            selected = [node for node in store.priorities if node["role"] == role][:5]
-        elif "мост" in lower or "связыва" in lower:
-            selected = sorted(store.nodes.values(), key=lambda node: (-node["cluster_bridge_score"], -node["priority_score"]))[:5]
+        cluster_match = re.search(r"(?:кластер|групп|cluster)\s*[№#]?\s*(\d+)", lower)
+        if cluster_match and int(cluster_match.group(1)) in store.clusters:
+            item = store.clusters[int(cluster_match.group(1))]
+            context["cluster"] = item
+            selected = [node for node in store.priorities if node["cluster_id"] == item["cluster_id"]][:12]
         else:
-            selected = store.priorities[:5]
-        referenced = [node["gid"] for node in selected]
-        answer = "Узлы для проверки по запросу:\n" + "\n".join(
-            f"• {node['gid']} — {ROLE_NAMES[node['role']]}, приоритет {node['priority_score']:.0%}. {node['evidence']}" for node in selected
+            role = "consolidator" if "консолид" in lower else "distributor" if "распредел" in lower else "transit" if "транзит" in lower else "coordinator" if "координац" in lower else "terminal" if "конечн" in lower else None
+            selected = [node for node in store.priorities if node["role"] == role][:12] if role else store.priorities[:12]
+        context["nodes"] = [_analyst_node(store, node["gid"], False) for node in selected]
+        source_gids.update(node["gid"] for node in selected)
+    return context, source_gids
+
+
+@app.get("/api/analyst/status")
+def analyst_status():
+    return {"mode": "openai" if os.environ.get("MONEYGRAPH_OPENAI_API_KEY") else "unconfigured"}
+
+
+@app.post("/api/analyst")
+def analyst(request: AnalystRequest):
+    """Use current graph evidence and a project-specific OpenAI key for real chat replies."""
+    key = os.environ.get("MONEYGRAPH_OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="OpenAI не подключён. Добавьте MONEYGRAPH_OPENAI_API_KEY в .env.local и перезапустите ./run.sh.")
+    context, source_gids = _analyst_context(get_store(), request)
+    try:
+        response = OpenAI(api_key=key, timeout=30.0, max_retries=0).responses.create(
+            model=os.environ.get("OPENAI_MODEL", "gpt-6-luna"),
+            reasoning={"effort": "none"},
+            instructions=(
+                "Ты аналитик обезличенной сети переводов. Отвечай по-русски на вопрос пользователя, "
+                "используя только переданные факты графа. Числа, связи и GID должны точно соответствовать контексту. "
+                "Если нужных фактов нет, назови недостающие данные. Различай наблюдаемую связь и гипотезу. "
+                "Не утверждай виновность и не называй приоритет вероятностью нарушения. "
+                "Пиши прямо, без общих вступлений и повторяющихся оговорок. Для конкретного счёта укажи GID. "
+                "Используй обычный текст без Markdown-заголовков и звёздочек."
+            ),
+            input=json.dumps({
+                "question": request.question.strip(),
+                "recent_dialog": [turn.model_dump() for turn in request.history[-8:]],
+                "graph_facts": context,
+            }, ensure_ascii=False),
+            max_output_tokens=900,
+            store=False,
         )
-        sources = [{"type": "node", "id": gid} for gid in referenced]
-    return {"answer": answer, "referenced_gids": referenced, "sources": sources,
-            "mode": "deterministic", "disclaimer": "Помощник использует рассчитанные признаки; выводы требуют проверки аналитиком."}
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=502, detail="Ключ OpenAI отклонён. Проверьте MONEYGRAPH_OPENAI_API_KEY.") from exc
+    except RateLimitError as exc:
+        raise HTTPException(status_code=502, detail="Лимит OpenAI исчерпан. Повторите запрос позже.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="OpenAI сейчас не ответил. Повторите запрос позже.") from exc
+    answer = response.output_text.strip()
+    if not answer:
+        raise HTTPException(status_code=502, detail="OpenAI вернул пустой ответ. Повторите запрос.")
+    mentioned = list(dict.fromkeys(re.findall(r"(?<!\d)\d{15,20}(?!\d)", answer)))
+    if any(gid not in source_gids and gid not in context["unknown_gids"] for gid in mentioned):
+        raise HTTPException(status_code=502, detail="Ответ содержал неподтверждённый GID. Попробуйте уточнить вопрос.")
+    referenced = [gid for gid in mentioned if gid in source_gids][:12]
+    return {"answer": answer, "referenced_gids": referenced,
+            "sources": [{"type": "node", "id": gid} for gid in referenced],
+            "mode": "openai", "disclaimer": "Проверьте вывод по исходным операциям и контексту счёта."}

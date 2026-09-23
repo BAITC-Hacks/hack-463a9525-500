@@ -8,7 +8,6 @@ import type { GraphData, GraphNode, Role } from "@/lib/data";
 const format = new Intl.NumberFormat("ru-RU");
 const short = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 });
 const roleNames: Record<Role, string> = { coordinator: "Координация", consolidator: "Консолидация", distributor: "Распределение", transit: "Транзит", terminal: "Получатель", peripheral: "Периферия" };
-const roleColors: Record<Role, string> = { coordinator: "var(--orange)", consolidator: "var(--amber)", distributor: "var(--violet)", transit: "var(--cyan)", terminal: "var(--blue)", peripheral: "var(--muted)" };
 
 function smoothPath(values: number[], width: number, height: number, pad = 4) {
   const min = Math.min(...values), max = Math.max(...values);
@@ -64,10 +63,9 @@ function VolumeChart({ data }: { data: GraphData }) {
     {totals.map((value, index) => {
       const barHeight = 38 + value / max * 135;
       const x = 34 + index * 48;
-      const active = index === 2 || index === 6;
-      return <g key={index} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} tabIndex={0} aria-label={`${index * 3 + 1}–${Math.min(31, index * 3 + 3)} июля: ${value} операций`}><rect x={x} y={205 - barHeight} width="27" height={barHeight + 18} rx="7" fill="url(#hatch)"/><rect x={x} y={205 - barHeight * .72} width="27" height={barHeight * .72 + 18} rx="7" fill={hover === index ? "var(--ink)" : active ? "var(--violet)" : "var(--orange)"}/><rect x={x + 5} y={211 - barHeight * .72} width="17" height="3" rx="2" fill="white"/></g>;
+      return <g key={index} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} tabIndex={0} aria-label={`${index * 3 + 1}–${Math.min(31, index * 3 + 3)} июля: ${value} операций`}><rect x={x} y={205 - barHeight} width="27" height={barHeight + 18} rx="7" fill="url(#hatch)"/><rect x={x} y={205 - barHeight * .72} width="27" height={barHeight * .72 + 18} rx="7" fill={hover === index ? "var(--ink)" : "var(--orange)"}/><rect x={x + 5} y={211 - barHeight * .72} width="17" height="3" rx="2" fill="white"/></g>;
     })}
-    <circle cx="20" cy="238" r="5" fill="var(--orange)" stroke="white" strokeWidth="2"/><circle cx="260" cy="238" r="5" fill="var(--violet)" stroke="white" strokeWidth="2"/><circle cx="500" cy="238" r="5" fill="var(--orange)" stroke="white" strokeWidth="2"/>
+    <circle cx="20" cy="238" r="5" fill="var(--orange)" stroke="white" strokeWidth="2"/><circle cx="260" cy="238" r="5" fill="var(--orange)" stroke="white" strokeWidth="2"/><circle cx="500" cy="238" r="5" fill="var(--orange)" stroke="white" strokeWidth="2"/>
   </svg><div className="chart-tooltip" role="status"><strong>{hover === null ? "Июль 2026" : `${hover * 3 + 1}–${Math.min(31, hover * 3 + 3)} июля`}</strong><span>{hover === null ? "Наведите на столбец" : `${format.format(totals[hover])} операций`}</span></div></div>;
 }
 

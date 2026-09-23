@@ -48,11 +48,46 @@ def test_api_investigation():
     assert client.get("/api/graph", params={"role": "not-a-role"}).status_code == 422
 
 
-def test_grounded_analyst_answer():
+def test_analyst_requires_project_key(monkeypatch):
+    monkeypatch.delenv("MONEYGRAPH_OPENAI_API_KEY", raising=False)
     gid = client.get("/api/top-nodes", params={"limit": 1}).json()[0]["gid"]
-    answer = client.post("/api/analyst", json={"question": f"Почему GID {gid} в топе?"}).json()
-    assert gid in answer["answer"] and answer["mode"] == "deterministic"
-    assert answer["referenced_gids"] == [gid]
+    response = client.post("/api/analyst", json={"question": f"Почему GID {gid} в топе?"})
+    assert response.status_code == 503
+    assert client.get("/api/analyst/status").json()["mode"] == "unconfigured"
+
+
+def test_openai_receives_selected_graph_facts(monkeypatch):
+    import backend.main as backend
+
+    gid = client.get("/api/top-nodes", params={"limit": 1}).json()[0]["gid"]
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return type("Response", (), {"output_text": f"По рассчитанным данным проверьте GID {gid}."})()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            assert kwargs["api_key"] == "test-project-key"
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("MONEYGRAPH_OPENAI_API_KEY", "test-project-key")
+    monkeypatch.setattr(backend, "OpenAI", FakeOpenAI)
+    result = client.post("/api/analyst", json={"question": f"Почему GID {gid} в топе?"}).json()
+    assert result["mode"] == "openai" and result["referenced_gids"] == [gid]
+    assert calls[0]["store"] is False
+    facts = json.loads(calls[0]["input"])["graph_facts"]
+    assert facts["nodes"][0]["gid"] == gid
+    assert len(facts["nodes"]) == 1
+    assert "dashboard" not in calls[0]["input"]
+
+    def fail(**kwargs):
+        raise RuntimeError("network failure")
+
+    monkeypatch.setattr(backend, "OpenAI", fail)
+    failure = client.post("/api/analyst", json={"question": f"Почему GID {gid} в топе?"})
+    assert failure.status_code == 502
 
 
 def test_path_and_resilience():

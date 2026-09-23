@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+if [[ -f .env.local ]]; then
+  set -a
+  source .env.local
+  set +a
+fi
 if [[ ! -x .venv/bin/python ]]; then python3 -m venv .venv; fi
 .venv/bin/python -m pip install -q -r requirements.txt
 if [[ ! -d node_modules ]]; then npm ci; fi
