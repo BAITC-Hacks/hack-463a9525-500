@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T09:28:18.534544+00:00",
+  "title": "Design System: Граф денег",
+  "extensions": {
+    "colorMeta": {
+      "orange": {
+        "role": "primary",
+        "displayName": "Сигнальный оранжевый",
+        "canonical": "oklch(0.69 0.21 40)",
+        "tonalRamp": [
+          "oklch(0.15 0.19 40)",
+          "oklch(0.25 0.19 40)",
+          "oklch(0.35 0.19 40)",
+          "oklch(0.45 0.19 40)",
+          "oklch(0.55 0.19 40)",
+          "oklch(0.65 0.19 40)",
+          "oklch(0.78 0.19 40)",
+          "oklch(0.95 0.19 40)"
+        ]
+      },
+      "violet": {
+        "role": "secondary",
+        "displayName": "Электрический пурпурный",
+        "canonical": "oklch(0.69 0.2 303)",
+        "tonalRamp": [
+          "oklch(0.15 0.17 303)",
+          "oklch(0.25 0.17 303)",
+          "oklch(0.35 0.17 303)",
+          "oklch(0.45 0.17 303)",
+          "oklch(0.55 0.17 303)",
+          "oklch(0.65 0.17 303)",
+          "oklch(0.78 0.17 303)",
+          "oklch(0.95 0.17 303)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Почти чёрный",
+        "canonical": "oklch(0.20 0 0)",
+        "tonalRamp": [
+          "oklch(0.15 0.00 0)",
+          "oklch(0.25 0.00 0)",
+          "oklch(0.35 0.00 0)",
+          "oklch(0.45 0.00 0)",
+          "oklch(0.55 0.00 0)",
+          "oklch(0.65 0.00 0)",
+          "oklch(0.78 0.00 0)",
+          "oklch(0.95 0.00 0)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Матовый графит",
+        "canonical": "oklch(0.17 0 0)",
+        "tonalRamp": [
+          "oklch(0.15 0.00 0)",
+          "oklch(0.25 0.00 0)",
+          "oklch(0.35 0.00 0)",
+          "oklch(0.45 0.00 0)",
+          "oklch(0.55 0.00 0)",
+          "oklch(0.65 0.00 0)",
+          "oklch(0.78 0.00 0)",
+          "oklch(0.95 0.00 0)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Белый текст",
+        "canonical": "oklch(0.97 0 0)",
+        "tonalRamp": [
+          "oklch(0.15 0.00 0)",
+          "oklch(0.25 0.00 0)",
+          "oklch(0.35 0.00 0)",
+          "oklch(0.45 0.00 0)",
+          "oklch(0.55 0.00 0)",
+          "oklch(0.65 0.00 0)",
+          "oklch(0.78 0.00 0)",
+          "oklch(0.95 0.00 0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Приветствие на главной панели."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Заголовки аналитических панелей."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "state",
+        "value": "200ms ease",
+        "purpose": "Смена состояния навигации и контролов."
+      },
+      {
+        "name": "reduced",
+        "value": "0ms",
+        "purpose": "Мгновенное состояние при prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tablet",
+        "value": "1040px"
+      },
+      {
+        "name": "mobile",
+        "value": "700px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Основное действие",
+      "kind": "button",
+      "refersTo": "action",
+      "description": "Переход к карте сети в верхней строке.",
+      "html": "<button class=\"ds-action\">Проверить сеть ↗</button>",
+      "css": ".ds-action{height:44px;padding:0 14px;border:1px solid oklch(.58 0 0);border-radius:10px;background:linear-gradient(180deg,oklch(.36 0 0),oklch(.19 0 0));color:oklch(.97 0 0);font:600 12px Inter,system-ui}.ds-action:hover{border-color:oklch(.69 .21 40)}.ds-action:focus-visible{outline:2px solid oklch(.69 .21 40);outline-offset:3px}"
+    },
+    {
+      "name": "Карточка метрики",
+      "kind": "card",
+      "refersTo": "stat-tile",
+      "description": "Одно из пяти чисел в верхней строке.",
+      "html": "<div class=\"ds-stat\"><span>Узлы сети</span><strong>2 248</strong></div>",
+      "css": ".ds-stat{width:180px;height:105px;padding:18px;border-radius:18px;background:oklch(.235 0 0);color:oklch(.97 0 0);font:14px Inter,system-ui}.ds-stat span{display:block;color:oklch(.72 0 0)}.ds-stat strong{display:block;margin-top:24px;font-size:25px;font-weight:750}"
+    },
+    {
+      "name": "Аналитическая панель",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Матовый контейнер графика или таблицы.",
+      "html": "<section class=\"ds-panel\"><h3>Объём переводов</h3><p>Операции по группам дней</p></section>",
+      "css": ".ds-panel{width:250px;min-height:130px;padding:20px 19px;border-radius:19px;background:oklch(.17 0 0);color:oklch(.97 0 0);font:14px Inter,system-ui}.ds-panel h3{margin:0;font-size:18px;font-weight:650}.ds-panel p{margin:7px 0 0;color:oklch(.72 0 0);font-size:12px}"
+    },
+    {
+      "name": "Поиск gid",
+      "kind": "input",
+      "refersTo": "panel",
+      "description": "Строковый поиск 18-значного идентификатора.",
+      "html": "<input class=\"ds-search\" aria-label=\"Поиск gid\" placeholder=\"Найти gid\">",
+      "css": ".ds-search{width:230px;height:38px;padding:0 11px;border:0;border-radius:8px;background:oklch(.245 0 0);color:oklch(.97 0 0);font:13px Inter,system-ui}.ds-search::placeholder{color:oklch(.69 0 0)}.ds-search:focus-visible{outline:2px solid oklch(.69 .21 40);outline-offset:2px}"
+    },
+    {
+      "name": "Навигация",
+      "kind": "nav",
+      "refersTo": "panel",
+      "description": "Иконка активного раздела в вертикальной рейке.",
+      "html": "<a class=\"ds-nav\" href=\"#\" aria-label=\"Обзор\">▦</a>",
+      "css": ".ds-nav{display:grid;place-items:center;width:43px;height:43px;border-radius:11px;background:oklch(.29 0 0);color:oklch(.97 0 0);font:24px Inter,system-ui;text-decoration:none}.ds-nav:hover{background:oklch(.36 0 0)}.ds-nav:focus-visible{outline:2px solid oklch(.69 .21 40);outline-offset:2px}"
+    },
+    {
+      "name": "Роль узла",
+      "kind": "chip",
+      "refersTo": "panel",
+      "description": "Словесная метка роли в карточке gid.",
+      "html": "<span class=\"ds-role\">Координация</span>",
+      "css": ".ds-role{display:inline-block;padding:6px 8px;border-radius:6px;background:oklch(.42 .12 40 / .35);color:oklch(.79 .18 40);font:650 11px Inter,system-ui}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Ночной операционный центр",
+    "overview": "Полноэкранная главная панель следует референсу: вертикальная рейка, пять метрик, три аналитические панели, таблица и график. Внешней рамки и широких полей нет; оранжевый свет остаётся за контентом.",
+    "keyCharacteristics": [
+      "Близкая к референсу композиция",
+      "Реальный аналитический контент",
+      "Матовые тёмные поверхности",
+      "Доступное управление с клавиатуры"
+    ],
+    "rules": [
+      {
+        "name": "The Signal Rule",
+        "body": "Насыщенный цвет обозначает данные или действие. Он не заполняет неактивную панель.",
+        "section": "colors"
+      },
+      {
+        "name": "The Numeric Rule",
+        "body": "Gid остаётся целой строкой; числа и проценты выравниваются табличными цифрами.",
+        "section": "typography"
+      },
+      {
+        "name": "The Matte Rule",
+        "body": "Базовая панель остаётся матовой; подсветка появляется на наведении и фокусе.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do сохранять сетку референса и растягивать сайт на весь viewport.",
+      "Do показывать количественные основания рядом с ролью и приоритетом.",
+      "Do соблюдать WCAG AA, клавиатуру и reduced motion."
+    ],
+    "donts": [
+      "Don’t использовать кричащие эффекты и перегруженный экран.",
+      "Don’t строить декоративную киберпанк эстетику, мешающую чтению.",
+      "Don’t писать безусловные обвинительные формулировки.",
+      "Don’t заменять референс типовой светлой SaaS-сеткой."
+    ]
+  }
+}
