@@ -7,7 +7,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fil
   const { file } = await params;
   if (!allowed.has(file)) return new Response("Not found", { status: 404 });
   try {
-    const content = await readFile(join(process.cwd(), "out", file));
+    const content = await readFile(join(process.cwd(), "outputs", file));
     return new Response(new Uint8Array(content), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

@@ -35,6 +35,12 @@ export type GraphData = {
 };
 
 export async function getGraphData(): Promise<GraphData> {
-  const content = await readFile(join(process.cwd(), "out", "dashboard.json"), "utf8");
+  try {
+    const response = await fetch(`${process.env.BACKEND_URL ?? "http://127.0.0.1:8000"}/api/dashboard`, { cache: "no-store" });
+    if (response.ok) return await response.json() as GraphData;
+  } catch {
+    // A direct Next.js preview still works after the pipeline has run.
+  }
+  const content = await readFile(join(process.cwd(), "outputs", "dashboard.json"), "utf8");
   return JSON.parse(content) as GraphData;
 }
