@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = Path(os.environ.get("MONEYGRAPH_OUTPUT_DIR", ROOT / "outputs"))
 ROLES = {"coordinator", "consolidator", "distributor", "transit", "terminal", "peripheral"}
+ROLE_NAMES = {"coordinator": "координация", "consolidator": "консолидация", "distributor": "распределение",
+              "transit": "возможный транзит", "terminal": "возможная точка остановки", "peripheral": "периферия"}
 
 
 class AnalystRequest(BaseModel):
@@ -196,6 +198,21 @@ def path(source: str, target: str):
             "limitation": "Путь описывает видимые связи, а не происхождение конкретных денег."}
 
 
+@app.get("/api/resilience")
+def resilience(remove_top: int = Query(default=5, ge=1, le=50)):
+    store = get_store()
+    before = sorted((len(group) for group in nx.weakly_connected_components(store.graph)), reverse=True)
+    removed = [node["gid"] for node in store.priorities[:remove_top]]
+    reduced = store.graph.copy()
+    reduced.remove_nodes_from(removed)
+    after = sorted((len(group) for group in nx.weakly_connected_components(reduced)), reverse=True)
+    return {"removed_gids": removed, "number_of_components_before": len(before),
+            "number_of_components_after": len(after), "largest_component_before": before[0],
+            "largest_component_after": after[0],
+            "largest_component_change_pct": round(100 * (before[0] - after[0]) / before[0], 2),
+            "limitation": "Структурный эксперимент на неполном графе; не утверждает контроль над средствами."}
+
+
 @app.post("/api/analyst")
 def analyst(request: AnalystRequest):
     """Grounded, deterministic analyst assistant; works without any external key."""
@@ -243,6 +260,16 @@ def analyst(request: AnalystRequest):
                       f"({node_data['role_score']:.0%}); приоритет проверки {node_data['priority_score']:.0%}; "
                       f"кластер {node_data['cluster_id']}. Это гипотеза для аналитика.")
             sources = [{"type": "node", "id": gid}]
+    elif ("связыва" in lower or "между" in lower) and len(re.findall(r"(?:кластер|cluster)\s*[№#]?\s*\d+", lower)) >= 2:
+        ids = [int(value) for value in re.findall(r"(?:кластер|cluster)\s*[№#]?\s*(\d+)", lower)[:2]]
+        cross = sorted((edge for edge in store.data["edges"] if
+                        {store.nodes[edge["src"]]["cluster_id"], store.nodes[edge["dst"]]["cluster_id"]} == set(ids)),
+                       key=lambda edge: -edge["sum_kzt"])
+        referenced = list(dict.fromkeys(gid for edge in cross[:5] for gid in (edge["src"], edge["dst"])))
+        answer = (f"Между кластерами {ids[0]} и {ids[1]} найдено {len(cross)} наблюдаемых связей. " +
+                  ("Крупнейшие пары: " + "; ".join(f"{edge['src']} → {edge['dst']}: {edge['sum_kzt']:,.0f} ₸" for edge in cross[:5])
+                   if cross else "Прямых переводов в выгрузке нет."))
+        sources = [{"type": "node", "id": gid} for gid in referenced]
     elif "кластер" in lower or "cluster" in lower:
         match = re.search(r"(?:кластер|cluster)\s*[№#]?\s*(\d+)", lower)
         if match and int(match.group(1)) in store.clusters:
@@ -262,8 +289,8 @@ def analyst(request: AnalystRequest):
         else:
             selected = store.priorities[:5]
         referenced = [node["gid"] for node in selected]
-        answer = "Приоритетные узлы: " + "; ".join(
-            f"{node['gid']} — {node['role']}, приоритет {node['priority_score']:.0%}, {node['evidence']}" for node in selected
+        answer = "Узлы для проверки по запросу:\n" + "\n".join(
+            f"• {node['gid']} — {ROLE_NAMES[node['role']]}, приоритет {node['priority_score']:.0%}. {node['evidence']}" for node in selected
         )
         sources = [{"type": "node", "id": gid} for gid in referenced]
     return {"answer": answer, "referenced_gids": referenced, "sources": sources,

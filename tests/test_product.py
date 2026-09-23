@@ -7,7 +7,6 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from pipeline import classify
 
 ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
@@ -54,3 +53,14 @@ def test_grounded_analyst_answer():
     answer = client.post("/api/analyst", json={"question": f"Почему GID {gid} в топе?"}).json()
     assert gid in answer["answer"] and answer["mode"] == "deterministic"
     assert answer["referenced_gids"] == [gid]
+
+
+def test_path_and_resilience():
+    data = json.loads((ROOT / "outputs" / "dashboard.json").read_text())
+    edge = data["edges"][0]
+    result = client.get("/api/path", params={"source": edge["src"], "target": edge["dst"]})
+    assert result.status_code == 200 and result.json()["hops"] == 1
+    resilience = client.get("/api/resilience", params={"remove_top": 5})
+    assert resilience.status_code == 200
+    assert len(resilience.json()["removed_gids"]) == 5
+    assert resilience.json()["number_of_components_after"] >= resilience.json()["number_of_components_before"]

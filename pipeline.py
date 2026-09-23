@@ -18,7 +18,7 @@ ROLE_LABELS = {
     "consolidator": "Консолидация",
     "transit": "Транзит",
     "distributor": "Распределение",
-    "terminal": "Конечный получатель",
+    "terminal": "Возможная точка остановки",
     "coordinator": "Координация",
     "peripheral": "Периферия",
 }
@@ -35,6 +35,8 @@ def load_and_validate(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.Da
     ):
         if not columns.issubset(table.columns):
             raise ValueError(f"Missing columns: {sorted(columns - set(table.columns))}")
+        if table[list(columns)].isna().any().any():
+            raise ValueError("Required source fields contain missing values")
     if nodes.gid.duplicated().any() or edges.duplicated(["src", "dst"]).any():
         raise ValueError("Duplicate node or edge identifiers")
     if not (set(edges.src) | set(edges.dst)).issubset(set(nodes.gid)):
@@ -43,9 +45,13 @@ def load_and_validate(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.Da
         raise ValueError("A transaction references a missing node")
     if (edges.sum_kzt < 0).any() or (transactions.sum_kzt < 0).any():
         raise ValueError("Negative transfers are not supported")
+    if (edges.n_tx <= 0).any() or not np.isfinite(edges.sum_kzt).all() or not np.isfinite(transactions.sum_kzt).all():
+        raise ValueError("Transfer amounts and counts must be finite and positive")
+    if not nodes.depth.between(0, 4).all():
+        raise ValueError("Node depth must be between 0 and 4")
     grouped = transactions.groupby(["src", "dst"]).sum_kzt.agg(["sum", "size"])
     check = edges.set_index(["src", "dst"])[["sum_kzt", "n_tx"]].join(grouped, how="outer")
-    if check.isna().any().any() or not np.allclose(check.sum_kzt, check["sum"], atol=0.02) or not (check.n_tx == check["size"]).all():
+    if check.isna().any().any() or not np.allclose(check.sum_kzt, check["sum"], atol=0.02, rtol=0) or not (check.n_tx == check["size"]).all():
         raise ValueError("Transaction totals do not match aggregated edges")
     transactions["date"] = pd.to_datetime(transactions.date, errors="raise")
     if transactions.date.isna().any():
@@ -335,13 +341,17 @@ def cluster_summary(frame: pd.DataFrame, edges: pd.DataFrame) -> pd.DataFrame:
         role_counts = group.role.value_counts()
         dominant = role_counts.index[0]
         if len(group) == 1:
-            hypothesis = "Изолированный узел; структура по наблюдаемым переводам не определяется."
+            hypothesis = "Отдельное сообщество в разбиении; проверьте видимые связи этого счёта."
         elif group.is_seed.mean() > .25:
             hypothesis = "Группа с высокой долей исходных счетов; проверьте общие направления переводов."
         elif dominant == "distributor":
             hypothesis = "Преобладают признаки распределения; проверьте получателей и временную последовательность."
         elif dominant == "consolidator":
             hypothesis = "Преобладают признаки консолидации; проверьте источники поступлений."
+        elif dominant == "terminal":
+            hypothesis = "Много счетов без видимого исходящего потока до границы данных; проверьте дальнейшую активность."
+        elif dominant == "peripheral":
+            hypothesis = "У многих счетов нет выраженного структурного профиля; начните с узлов с высоким приоритетом."
         elif group.number_of_connected_clusters.max() >= 2:
             hypothesis = "Есть связи с несколькими сообществами; проверьте переходы между ними."
         else:
